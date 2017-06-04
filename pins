@@ -3,3 +3,21 @@
 5 = blue 
 4 = green
 And = red
+
+#protocol
+variable length
+start char - end char
+	to car
+		direction 	- 1 char
+		speed		- 1 char
+		stepper		- 1 char
+		sonar		- 2 bytes
+		read_sonar	- 0 byte
+		crc 		- 1 char
+	to phone
+		error state
+			no error 		- 0 byte
+			crc error		- 0 byte
+			command not complete 	- 1 byte
+		sonar out 	- 1 byte
+	
