@@ -9,11 +9,13 @@
 //The pin connections need to be 4 pins connected
 // to Motor Driver In1, In2, In3, In4  and then the pins entered
 // here in the sequence 1-3-2-4 for proper sequencing
-Stepper small_stepper(STEPS_PER_MOTOR_REVOLUTION, 8, 10, 9, 11);
+Stepper small_stepper(STEPS_PER_MOTOR_REVOLUTION, 2, 12, 3, 13);
+
+#define DEBUG_COMMANDER
 
 
 /*-----( Declare Variables )-----*/
-int  Steps2Take;
+int  Steps2Take = 64;
 
 // forward and backward motors
 int move_speed = 200; 
@@ -66,6 +68,8 @@ void init_motors () {
   
   pinMode(turn_in2, OUTPUT);
   digitalWrite(turn_in2, LOW);
+
+  small_stepper.setSpeed(700);
 }
 
 
@@ -158,37 +162,6 @@ byte read_encoder_state() {
 /* Command handling */
 
 boolean handle_command(String code) {
-
-  if (code == "f") {
-    move_forward();
-    return true;
-  }
-  
-  if (code == "b") {
-    move_backward();
-    return true;
-  }
-  
-  if (code == "s") {
-    stop_move();
-    return true;
-  }
-
-  if (code == "l") {
-    turn_left();
-    return true;
-  }
-
-  if (code == "r") {
-    turn_right();
-    return true;
-  }
-
-  if (code == "c") {
-    turn_center();
-    return true;
-  }
-
   if (code == "rl") {
     Steps2Take  = 256;
     small_stepper.setSpeed(700);   
@@ -225,10 +198,12 @@ class Commander
     uint8_t stepper_position = 128; // 64 - look left, 128 - forward, 192 - right
     uint8_t sonar_position = 128; // -------------------||-----------------------
     uint8_t sonar_altitude = 0; // 0 - look down, 255 - look up
-    
-    bool update_needed[5] = {true, true, true, true, true};
 
+    // if the displayed state needs to be adjusted to be closer to the desired state
+    // for example stepper needs periodic adjustment in order not to block the threead 
+    bool update_needed[5] = {true, true, true, true, true};
     uint8_t input_buffer[50];
+    int32_t current_stepper_position = 0; // home position
     
   public:
     enum error_codes
@@ -239,7 +214,8 @@ class Commander
       error_codes_count
     };
     
-    Commander(){}
+    Commander()
+    {}
     send_msg(uint8_t *data, uint8_t len){}
     process_input_msg()
     {
@@ -252,7 +228,7 @@ class Commander
       uint8_t in_byte = 0;
       uint8_t prev_in_byte = 0;
       uint8_t crc = 0;
-      uint16_t i = 0;
+      uint8_t i = 0;
       for(;Serial.available() && 3 != (in_byte = Serial.read()); i++)
       {
         crc += prev_in_byte; // do not add crc byte
@@ -261,8 +237,13 @@ class Commander
       }
 
       #ifdef DEBUG_COMMANDER
+        Serial.print("i = ");
+        Serial.println(i);
+      #endif
+
+      #ifdef DEBUG_COMMANDER
       // print array
-      for(int j=0; j <= i; j++)
+      for(int j=0; j <= i - 1; j++)
       {
         Serial.print(input_buffer[j]);
         Serial.print(", ");
@@ -270,13 +251,15 @@ class Commander
       Serial.println();
       #endif
 
-      if(crc != input_buffer[i])
+      if(crc != input_buffer[i - 1])
       {// crc error
         uint8_t data[] = {crc_error};
         send_msg(data, 1);
         #ifdef DEBUG_COMMANDER
-          Serial.println("crc error");
+          Serial.print("crc error = ");
+          Serial.println(crc);
         #endif
+        // TODO
       }
 
       //process message
@@ -287,7 +270,35 @@ class Commander
           case 'd':
           {
             direction_ = input_buffer[j + 1];
+            #ifdef DEBUG_COMMANDER
+              Serial.print("direction_ = ");
+              Serial.println(direction_);
+            #endif
             update_needed[0] = true;
+            j += 2;
+            break;
+          }
+
+          case 's':
+          {
+            speed_ = input_buffer[j + 1];
+            #ifdef DEBUG_COMMANDER
+              Serial.print("speed_ = ");
+              Serial.println(speed_);
+            #endif
+            update_needed[1] = true;
+            j += 2;
+            break;
+          }
+
+          case 'l':
+          {
+            speed_ = input_buffer[j + 1];
+            #ifdef DEBUG_COMMANDER
+              Serial.print("stepper = ");
+              Serial.println(stepper_position);
+            #endif
+            update_needed[2] = true;
             j += 2;
             break;
           }
@@ -313,14 +324,88 @@ class Commander
       }*/
       if(update_needed[0])
       {
+        #ifdef DEBUG_COMMANDER
+          Serial.print("turning: ");
+        #endif
         if(direction_ == 128)
+        {
           turn_center();
+          #ifdef DEBUG_COMMANDER
+            Serial.println("center");
+          #endif
+        }
         else if(direction_ > 128)
+        {
           turn_right();
+          #ifdef DEBUG_COMMANDER
+            Serial.println("right");
+          #endif
+        }
         else if(direction_ < 128)
+        {
           turn_left();
+          #ifdef DEBUG_COMMANDER
+            Serial.println("left");
+          #endif
+        }
 
         update_needed[0] = false;
+      }
+
+      if(update_needed[1])
+      {
+        if(speed_ == 128)
+        {
+          #ifdef DEBUG_COMMANDER
+            Serial.println("stop");
+          #endif
+          stop_move();
+        }
+        else if(speed_ > 128)
+        {
+          #ifdef DEBUG_COMMANDER
+            Serial.println("forward");
+          #endif
+          move_forward();
+        }
+        else if(speed_ < 128)
+        {
+          #ifdef DEBUG_COMMANDER
+            Serial.println("back");
+          #endif
+          move_backward();
+        }
+
+        update_needed[1] = false;
+      }
+
+      if(update_needed[2])
+      {
+        if(speed_ == 128)
+        {
+          #ifdef DEBUG_COMMANDER
+            Serial.println("stop step");
+          #endif
+          update_needed[2] = false;
+        }
+        else if(speed_ > 128)
+        {
+          #ifdef DEBUG_COMMANDER
+            Serial.println("step to right");
+          #endif
+          small_stepper.step(-Steps2Take);
+          current_stepper_position += -Steps2Take;
+        }
+        else if(speed_ < 128)
+        {
+          #ifdef DEBUG_COMMANDER
+            Serial.println("step to left");
+          #endif
+          small_stepper.step(Steps2Take);
+          current_stepper_position += Steps2Take;
+        }
+
+        //update_needed[2] = false;
       }
     }
     
@@ -387,6 +472,10 @@ void loop() {
       Serial.println(data);
     }
   }*/
-  cmd.process_input_msg();
+  if(Serial.available())
+  {
+    cmd.process_input_msg();
+  }
   cmd.implement_commands();
+  delay(20);
 }
