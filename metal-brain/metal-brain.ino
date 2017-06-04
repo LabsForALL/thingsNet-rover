@@ -11,7 +11,7 @@
 // here in the sequence 1-3-2-4 for proper sequencing
 Stepper small_stepper(STEPS_PER_MOTOR_REVOLUTION, 2, 12, 3, 13);
 
-#define DEBUG_COMMANDER
+//#define DEBUG_COMMANDER
 
 
 /*-----( Declare Variables )-----*/
@@ -74,7 +74,6 @@ void init_motors () {
 
 
 /* Forward and backward moving control*/
-
 void stop_move(){
   digitalWrite(move_in1, LOW);
   digitalWrite(move_in2, LOW);
@@ -92,12 +91,10 @@ void move_backward(){
 
 
 /* Left and right turning control*/
-
 void stop_turn(){
     digitalWrite(turn_in1, LOW);
     digitalWrite(turn_in2, LOW);
 }
-
 
 void turn_left() {
     stop_turn();
@@ -119,7 +116,6 @@ void turn_left() {
     }
 }
 
-
 void turn_right(){
     stop_turn();
     unsigned long long end_time = millis() + turn_delay; 
@@ -128,7 +124,6 @@ void turn_right(){
     while(TURNED_RIGHT != read_encoder_state() && end_time > millis());
     stop_turn();
 }
-
 
 void turn_center() {
   stop_turn();
@@ -160,42 +155,20 @@ byte read_encoder_state() {
 
 
 /* Command handling */
-
-boolean handle_command(String code) {
-  if (code == "rl") {
-    Steps2Take  = 256;
-    small_stepper.setSpeed(700);   
-    
-    while(true) {
-      small_stepper.step(Steps2Take);
-      if (get_serial_data() == "sr") break;
-    }
-    
-    return true;
-  }
-
-  if (code == "rr") {
-    Steps2Take  = - 256;  // Rotate CW 1/2 turn
-    small_stepper.setSpeed(700);   
-    
-    while(true) {
-      small_stepper.step(Steps2Take);
-      if (get_serial_data() == "sr") break;
-    }
-    
-    return true;
-  }
-
-  return false;
-}
-
 class Commander
 {
   protected:
+    enum value_index
+    {
+      INDEX_DIRECTION = 0,
+      INDEX_SPEED = 1,
+      INDEX_STEPPER_MOTOR = 2,
+    };
     // all variables represent desired state, they are to be compared with current state
     uint8_t direction_ = 128; // 128 - center, 0 - left, 255 - right
     uint8_t speed_ = 128; // 0 - full reverse, 128 - stop, 255 - full forward
-    uint8_t stepper_position = 128; // 64 - look left, 128 - forward, 192 - right
+    uint8_t stepper_position = 128; // 64 - turn left, 128 - stop, 192 - turn right
+    // TODO: not implemented yet
     uint8_t sonar_position = 128; // -------------------||-----------------------
     uint8_t sonar_altitude = 0; // 0 - look down, 255 - look up
 
@@ -214,8 +187,7 @@ class Commander
       error_codes_count
     };
     
-    Commander()
-    {}
+    Commander(){}
     send_msg(uint8_t *data, uint8_t len){}
     process_input_msg()
     {
@@ -229,7 +201,7 @@ class Commander
       uint8_t prev_in_byte = 0;
       uint8_t crc = 0;
       uint8_t i = 0;
-      for(;Serial.available() && 3 != (in_byte = Serial.read()); i++)
+      for(;Serial.available() && 3 != (in_byte = Serial.read()) && i < 50; i++)
       {
         crc += prev_in_byte; // do not add crc byte
         input_buffer[i] = in_byte;
@@ -242,7 +214,7 @@ class Commander
       #endif
 
       #ifdef DEBUG_COMMANDER
-      // print array
+      // print msg array
       for(int j=0; j <= i - 1; j++)
       {
         Serial.print(input_buffer[j]);
@@ -274,7 +246,7 @@ class Commander
               Serial.print("direction_ = ");
               Serial.println(direction_);
             #endif
-            update_needed[0] = true;
+            update_needed[INDEX_DIRECTION] = true;
             j += 2;
             break;
           }
@@ -286,7 +258,7 @@ class Commander
               Serial.print("speed_ = ");
               Serial.println(speed_);
             #endif
-            update_needed[1] = true;
+            update_needed[INDEX_SPEED] = true;
             j += 2;
             break;
           }
@@ -298,7 +270,7 @@ class Commander
               Serial.print("stepper = ");
               Serial.println(stepper_position);
             #endif
-            update_needed[2] = true;
+            update_needed[INDEX_STEPPER_MOTOR] = true;
             j += 2;
             break;
           }
@@ -310,10 +282,8 @@ class Commander
               Serial.println("default:");
             #endif
           }
-          
         }
       }
-      
     }
 
     implement_commands()
@@ -322,7 +292,7 @@ class Commander
       {
         if(update_needed[i])
       }*/
-      if(update_needed[0])
+      if(update_needed[INDEX_DIRECTION])
       {
         #ifdef DEBUG_COMMANDER
           Serial.print("turning: ");
@@ -349,11 +319,14 @@ class Commander
           #endif
         }
 
-        update_needed[0] = false;
+        update_needed[INDEX_DIRECTION] = false;
       }
 
-      if(update_needed[1])
+      if(update_needed[INDEX_SPEED])
       {
+        #ifdef DEBUG_COMMANDER
+          Serial.print("moving: ");
+        #endif
         if(speed_ == 128)
         {
           #ifdef DEBUG_COMMANDER
@@ -376,17 +349,17 @@ class Commander
           move_backward();
         }
 
-        update_needed[1] = false;
+        update_needed[INDEX_SPEED] = false;
       }
 
-      if(update_needed[2])
+      if(update_needed[INDEX_STEPPER_MOTOR])
       {
         if(speed_ == 128)
         {
           #ifdef DEBUG_COMMANDER
             Serial.println("stop step");
           #endif
-          update_needed[2] = false;
+          update_needed[INDEX_STEPPER_MOTOR] = false;
         }
         else if(speed_ > 128)
         {
@@ -404,25 +377,9 @@ class Commander
           small_stepper.step(Steps2Take);
           current_stepper_position += Steps2Take;
         }
-
-        //update_needed[2] = false;
       }
     }
-    
 };
-
-
-/* Setup and serial communication */
-
-String get_serial_data(){
-  String data = "";
-  while (Serial.available()) {
-    data += (char) Serial.read();
-    delay(10);
-  }
-  return data;
-}
-
 
 void setup() {
   
@@ -453,25 +410,11 @@ void setup() {
     digitalWrite(LED_BUILTIN, LOW);
     delay(200);
   } 
-  
 }
 
 Commander cmd;
 
 void loop() {
-
-  /*String data = get_serial_data();
-  
-  if (data.length() > 0) {
-    if (handle_command(data)) {
-      // indicatng that the command was proceeded
-      digitalWrite(LED_BUILTIN, HIGH); 
-      delay(50);
-      digitalWrite(LED_BUILTIN, LOW);
-    }else{
-      Serial.println(data);
-    }
-  }*/
   if(Serial.available())
   {
     cmd.process_input_msg();
