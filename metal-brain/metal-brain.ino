@@ -76,12 +76,10 @@ void stop_move(){
   digitalWrite(move_in2, LOW);
 }
 
-
 void move_forward(){
   stop_move();
   analogWrite(move_in1, move_speed);
 }
-
 
 void move_backward(){
   stop_move();
@@ -192,7 +190,7 @@ boolean handle_command(String code) {
   }
 
   if (code == "rl") {
-    Steps2Take  = 256;  // Rotate CW 1/2 turn
+    Steps2Take  = 256;
     small_stepper.setSpeed(700);   
     
     while(true) {
@@ -217,6 +215,116 @@ boolean handle_command(String code) {
 
   return false;
 }
+
+class Commander
+{
+  protected:
+    // all variables represent desired state, they are to be compared with current state
+    uint8_t direction_ = 128; // 128 - center, 0 - left, 255 - right
+    uint8_t speed_ = 128; // 0 - full reverse, 128 - stop, 255 - full forward
+    uint8_t stepper_position = 128; // 64 - look left, 128 - forward, 192 - right
+    uint8_t sonar_position = 128; // -------------------||-----------------------
+    uint8_t sonar_altitude = 0; // 0 - look down, 255 - look up
+    
+    bool update_needed[5] = {true, true, true, true, true};
+
+    uint8_t input_buffer[50];
+    
+  public:
+    enum error_codes
+    {
+      no_error = 0,
+      crc_error,
+      command_not_complete,
+      error_codes_count
+    };
+    
+    Commander(){}
+    send_msg(uint8_t *data, uint8_t len){}
+    process_input_msg()
+    {
+      // exaust any junk data before start of msg
+      while(Serial.available() && Serial.read() != 2); 
+      #ifdef DEBUG_COMMANDER
+        Serial.println("exausted junk data");
+      #endif
+      
+      uint8_t in_byte = 0;
+      uint8_t prev_in_byte = 0;
+      uint8_t crc = 0;
+      uint16_t i = 0;
+      for(;Serial.available() && 3 != (in_byte = Serial.read()); i++)
+      {
+        crc += prev_in_byte; // do not add crc byte
+        input_buffer[i] = in_byte;
+        prev_in_byte = in_byte;
+      }
+
+      #ifdef DEBUG_COMMANDER
+      // print array
+      for(int j=0; j <= i; j++)
+      {
+        Serial.print(input_buffer[j]);
+        Serial.print(", ");
+      }
+      Serial.println();
+      #endif
+
+      if(crc != input_buffer[i])
+      {// crc error
+        uint8_t data[] = {crc_error};
+        send_msg(data, 1);
+        #ifdef DEBUG_COMMANDER
+          Serial.println("crc error");
+        #endif
+      }
+
+      //process message
+      for(int j=0; j <= i;)
+      {
+        switch(input_buffer[j])
+        {
+          case 'd':
+          {
+            direction_ = input_buffer[j + 1];
+            update_needed[0] = true;
+            j += 2;
+            break;
+          }
+          
+          default:
+          {
+            j = i + 1; // exit out of loop 
+            #ifdef DEBUG_COMMANDER
+              Serial.println("default:");
+            #endif
+          }
+          
+        }
+      }
+      
+    }
+
+    implement_commands()
+    {
+      /*for(int i = 0; i < 5; i++)
+      {
+        if(update_needed[i])
+      }*/
+      if(update_needed[0])
+      {
+        if(direction_ == 128)
+          turn_center();
+        else if(direction_ > 128)
+          turn_right();
+        else if(direction_ < 128)
+          turn_left();
+
+        update_needed[0] = false;
+      }
+    }
+    
+};
 
 
 /* Setup and serial communication */
@@ -263,10 +371,11 @@ void setup() {
   
 }
 
+Commander cmd;
 
 void loop() {
 
-  String data = get_serial_data();
+  /*String data = get_serial_data();
   
   if (data.length() > 0) {
     if (handle_command(data)) {
@@ -277,6 +386,7 @@ void loop() {
     }else{
       Serial.println(data);
     }
-  }
-  
+  }*/
+  cmd.process_input_msg();
+  cmd.implement_commands();
 }
